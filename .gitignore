@@ -1,0 +1,24 @@
+# Archivos objeto y ejecutables genéricos
+*.o
+*.obj
+*.out
+*.bin
+*.exe
+
+# Archivos ejecutables y listados típicos de Motorola 68000 / EASy68k
+*.s68
+*.h68
+*.l68
+*.lst
+*.map
+
+# Archivos de depuración y volcados
+*.log
+*.dmp
+
+# Entorno de desarrollo
+.vscode/
+
+# Archivos del sistema operativo
+Thumbs.db
+desktop.ini
