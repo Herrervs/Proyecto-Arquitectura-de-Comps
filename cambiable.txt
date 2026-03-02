@@ -1,0 +1,3 @@
+INT y RTI bastante
+
+SCAN y PRINT algo; uniendo el a y b en ambos con un if al principio bifurcando la ejecucion
