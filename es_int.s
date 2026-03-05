@@ -25,31 +25,67 @@ O_IVR       EQU     $19         * Offset IVR (Lect/Escr)
 COPIAIMR    DS.B    1           * Copia del IMR
 HUECO       DS.B    1
 
+* Defincion de constantes simbolicas (config. DUART)
+*****************************************************************
+
+* Comandos de control (CRA / CRB)
+CMD_RST_MR  EQU     %00010000   * Reinicia el puntero interno de MR1/MR2
+CMD_EN_RXTX EQU     %00000101   * Habilita Transmisión (bit 0) y Recepción (bit 2)
+
+* Config de modo (MR1 / MR2)
+CONF_8BITS  EQU     %00000011   * MR1: 8 bits por caracter, sin paridad
+CONF_NOECO  EQU     %00000000   * MR2: Modo normal de operación, sin eco
+
+* Config. de reloj y velocidad (ACR / CSR)
+CONF_ACR    EQU     %00000000   * ACR: Baud Rate Set 1
+VEL_38400   EQU     %11001100   * CSR: Tx y Rx a 38400bps
+
+* Interrupciones (IVR / IMR)
+VEC_INT     EQU     $40         * Vector de interrupción 64 (0x40)
+INT_RX_AB   EQU     %00100010   * IMR: Habilita interrupciones de RxA (bit 1) y RxB (bit 5)
+
+* Bits del registro de estado de interrupciones (ISR / IMR)
+BIT_RXA EQU     1               * Recepción en Línea A
+BIT_RXB EQU     5               * Recepción en Línea B
+BIT_TXA EQU     0               * Transmisión en Línea A
+BIT_TXB EQU     4               * Transmisión en Línea B
+
 **************************** INIT *************************************************************
 INIT:
-        MOVE.B          #%00010000,CRA      * Reinicia el puntero MR1A
-        MOVE.B          #%00000011,MR1A     * 8 bits por caracter.
-        MOVE.B          #%00000000,MR2A     * Eco desactivado.
-        MOVE.B          #%11001100,CSRA     * Velocidad = 38400 bps.
-		
-		MOVE.B          #%00010000,CRB      * Reinicia el puntero MR1B
-        MOVE.B          #%00000011,MR1B     * 8 bits por caracter.
-        MOVE.B          #%00000000,MR2B     * Eco desactivado.
-        MOVE.B          #%11001100,CSRB     * Velocidad = 38400 bps.
-		
-        MOVE.B          #%00000000,ACR      * Velocidad = 38400 bps.
-        MOVE.B          #%00000101,CRA      * Transmision y recepcion activados.
-		MOVE.B          #%00000101,CRB		* Transmision y recepcion activados.
-		
-		MOVE.B 			#$40,IVR			* Vector de interrupción
-		
-		MOVE.B 			#%00100010,COPIAIMR	* Habilitamos interrupciones de recepción, no de transmision
-		MOVE.B 			COPIAIMR,IMR 		* MOVE.B 	#%00100010,IMR
-		
-		MOVE.L 			#RTI,$100			* Actualizmos dirección RTI en Tabla de Vectores
-		
-		BSR				INI_BUFS
-		
+        * Cargar dirección base del periférico
+        LEA     $EFFC00, A0             * A0 apunta a la dirección base de la DUART
+
+        * Configuración de la Línea A
+        MOVE.B  #CMD_RST_MR, O_CRA(A0)  * Reinicia puntero MR1A
+        MOVE.B  #CONF_8BITS, O_MRA(A0)  * MR1A: 8 bits por carácter
+        MOVE.B  #CONF_NOECO, O_MRA(A0)  * MR2A: Modo normal (el puntero avanzó automáticamente)
+        MOVE.B  #VEL_38400, O_SRA(A0)   * CSRA: Velocidad 38400 bps
+
+        * Configuración de la Línea B
+        MOVE.B  #CMD_RST_MR, O_CRB(A0)  * Reinicia puntero MR1B
+        MOVE.B  #CONF_8BITS, O_MRB(A0)  * MR1B: 8 bits por carácter
+        MOVE.B  #CONF_NOECO, O_MRB(A0)  * MR2B: Modo normal
+        MOVE.B  #VEL_38400, O_SRB(A0)   * CSRB: Velocidad 38400 bps
+
+        * Activación Global (ACR y habilitación de Rx/Tx)
+        MOVE.B  #CONF_ACR, O_ACR(A0)    * Selecciona el conjunto de velocidades 1
+        MOVE.B  #CMD_EN_RXTX, O_CRA(A0) * Enciende Tx y Rx en Línea A
+        MOVE.B  #CMD_EN_RXTX, O_CRB(A0) * Enciende Tx y Rx en Línea B
+
+        * Configuración del Vector de Interrupción en la DUART
+        MOVE.B  #VEC_INT, O_IVR(A0)     * Establece el vector de interrupción (0x40)
+        
+        * Configuración de la Máscara de Interrupciones (IMR)
+        MOVE.B  #INT_RX_AB, COPIAIMR    * Guardamos el estado inicial en nuestra variable global
+        MOVE.B  COPIAIMR, O_IMR(A0)     * Volcamos la máscara al registro físico IMR
+
+        * Enlace en la Tabla de Vectores de Excepción del 68000
+        * (el vector $40 se multiplica por 4 bytes para obtener la dirección $100)
+        MOVE.L  #RTI, $100              * Colocamos la dirección de nuestra rutina RTI en $100
+
+        * Inicialización de estructuras de datos auxiliares
+        BSR     INI_BUFS
+
         RTS
 **************************** FIN INIT *********************************************************
 
@@ -111,23 +147,22 @@ HABILITAR_A:
         BSET    #0, COPIAIMR    * Bit 0 = Interrupción de transmisión Línea A
 
 APLICAR_IMR:
-        MOVE.B  COPIAIMR, $EFFC0B * Volcamos la copia al registro real IMR (o usar O_IMR si cambiaste las directivas EQU)
+        MOVE.B  COPIAIMR, DUART_BASE+O_IMR * Volcamos la copia al registro real IMR (o usar O_IMR si cambiaste las directivas EQU)
         MOVE.W  D6, SR          * Restauramos el registro de estado (fin de exclusión mutua)
 
 EXITO_PRINT:
         MOVE.L  D4, D0          * Devolvemos el número de caracteres procesados en D0
-        BRA     SALIR_PRINT
+        BRA     FIN_PRINT
 
 ERROR_PRINT:
         MOVE.L  #$FFFFFFFF, D0  * Error por descriptor inválido
 
-SALIR_PRINT:
+FIN_PRINT:
         UNLK    A6      
         RTS
 **************************** FIN PRINT ****************************************
 
 **************************** SCAN ************************************************************
-**************************** SCAN ********************************************
 SCAN:   
         LINK    A6,#0
         
@@ -162,7 +197,7 @@ BUCLE_SCAN:
 
 EXITO_SCAN:
         MOVE.L  D4,D0           * Devolvemos el número total de caracteres leídos en D0
-        BRA     SALIR_SCAN
+        BRA     FIN_SCAN
 
 ERROR_SCAN:
         MOVE.L  #$FFFFFFFF,D0   * Devolvemos el código de error por descriptor inválido
@@ -173,77 +208,108 @@ FIN_SCAN:
 **************************** FIN SCAN ****************************************
 
 **************************** RTI ******************************************
+RTI:    
+        * Salvar registros
+        MOVEM.L D0-D1/A0, -(A7)
+        LEA     DUART_BASE, A0      * Cargamos la base de la DUART en A0
 
-RTI:	MOVEM.L 		D0-D1,-(A7)
-BUCLE1:	MOVE.B 			ISR,D1
-		AND.B 			COPIAIMR,D1
-		BTST			#1,D1				* Recepción línea A
-		BNE				RXLA				* Si el bit no es 0 (entonces es 1) hay interrupción
-		BTST			#5,D1				* Recepción línea B
-		BNE 			RXLB
-		BTST			#0,D1				* Transmisión línea A
-		BNE 			TXLA
-		BTST			#4,D1				* Transmisión línea BEQ
-		BNE 			TXLB
-		BRA				FINRTI
-		
-RXLA:	MOVE.B 			RBA,D1
-		MOVE.L 			#0,D0
-		BSR				ESCCAR
-		CMP.L 			#-1,D0
-		BEQ				FINRTI				* Si está lleno el buffer terminamos
-		BRA				BUCLE1
-		
-RXLB:	MOVE.B 			RBB,D1
-		MOVE.L 			#1,D0
-		BSR				ESCCAR
-		CMP.L 			#-1,D0
-		BEQ				FINRTI				* Si está lleno el buffer terminamos
-		BRA				BUCLE1
+BUCLE_RTI:
+        * Leer estado de interrupciones y aplicar máscara
+        MOVE.B  O_IMR(A0), D1       * Leer ISR
+        AND.B   COPIAIMR, D1        * Nos quedamos solo con las interrupciones permitidas
 
-TXLA:	MOVE.L 			#2,D0
-		BSR				LEECAR
-		CMP.L 			#-1,D0
-		BEQ				INHA
-		MOVE.B 			D0,TBA
-		BRA				BUCLE1
-		
-INHA:	BCLR			#0,COPIAIMR
-		MOVE.B 			COPIAIMR,IMR
-		BRA				BUCLE1
-		
-TXLB:	MOVE.L 			#3,D0
-		BSR				LEECAR
-		CMP.L 			#-1,D0
-		BEQ				INHB
-		MOVE.B 			D0,TBB
-		BRA				BUCLE1
-		
-INHB:	BCLR			#4,COPIAIMR
-		MOVE.B 			COPIAIMR,IMR
-		BRA				BUCLE1
+        * Evaluar quien ha interrumpido
+        BTST    #BIT_RXA, D1
+        BNE     RUTINA_RXA
+        BTST    #BIT_RXB, D1
+        BNE     RUTINA_RXB
+        BTST    #BIT_TXA, D1
+        BNE     RUTINA_TXA
+        BTST    #BIT_TXB, D1
+        BNE     RUTINA_TXB
 
-FINRTI:	MOVEM.L 		(A7)+,D0-D1
-		RTE		
+        * Si llegamos aquí, hemos atendido todo lo pendiente
+        BRA     FIN_RTI
 
+RUTINA_RXA:
+        MOVE.B  O_TBA(A0), D1       * Leer carácter del RBA (Offset $07)
+        MOVE.L  #0, D0              * Parámetro: Buffer circular RxA (0)
+        BSR     ESCCAR              * Guardar en buffer de memoria
+        CMP.L   #-1, D0
+        BEQ     FIN_RTI             * Si el buffer de memoria está lleno, perdemos el dato y salimos
+        BRA     BUCLE_RTI           * Volver a comprobar interrupciones
+
+RUTINA_RXB:
+        MOVE.B  O_TBB(A0), D1       * Leer carácter del RBB (Offset $17)
+        MOVE.L  #1, D0              * Parámetro: Buffer circular RxB (1)
+        BSR     ESCCAR
+        CMP.L   #-1, D0
+        BEQ     FIN_RTI
+        BRA     BUCLE_RTI
+
+RUTINA_TXA:
+        MOVE.L  #2, D0              * Parámetro: Buffer circular TxA (2)
+        BSR     LEECAR              * Sacar carácter de la memoria
+        CMP.L   #-1, D0
+        BEQ     INHIBIR_TXA         * Si el buffer está vacío, apagar interrupción
+        MOVE.B  D0, O_TBA(A0)       * Escribir carácter en hardware TBA (Offset $07)
+        BRA     BUCLE_RTI
+
+INHIBIR_TXA:
+        BCLR    #BIT_TXA, COPIAIMR  * Borrar bit en nuestra copia en RAM
+        MOVE.B  COPIAIMR, O_IMR(A0) * Volcar nueva máscara al hardware
+        BRA     BUCLE_RTI
+
+RUTINA_TXB:
+        MOVE.L  #3, D0              * Parámetro: Buffer circular TxB (3)
+        BSR     LEECAR
+        CMP.L   #-1, D0
+        BEQ     INHIBIR_TXB
+        MOVE.B  D0, O_TBB(A0)       * Escribir carácter en hardware TBB (Offset $17)
+        BRA     BUCLE_RTI
+
+INHIBIR_TXB:
+        BCLR    #BIT_TXB, COPIAIMR
+        MOVE.B  COPIAIMR, O_IMR(A0)
+        BRA     BUCLE_RTI
+
+FIN_RTI:
+        MOVEM.L (A7)+, D0-D1/A0     * Restaurar todos los registros modificados
+        RTE                         * Return from Exception
 **************************** FIN RTI **********************************************
 
 **************************** PROGRAMA PRINCIPAL **********************************************
+TAMANO  EQU     80          * Tamaño del bloque (80 caracteres, cumple la norma < 300)
+DIR_BUF EQU     $5000       * Dirección de memoria libre para el buffer temporal
 
-TAMANO EQU 1
+INICIO: 
+        BSR     INIT        * Inicia el controlador DUART y sus interrupciones
 
-INICIO: BSR             INIT                * Inicia el controlador
-* OTRO:   MOVE.W        #TAMANO,-(A7)
-*       MOVE.L          #$5000,-(A7)        * Prepara la direccion del buffer
-*         BSR             SCAN                * Recibe la linea
-*         ADD.L           #6,A7               * Restaura la pila
-*       MOVE.W          #TAMANO,-(A7)
-*         MOVE.L          #$5000,-(A7)        * Prepara la direccion del buffer
-*         BSR             PRINT               * Imprime linea
-*         ADD.L           #6,A7               * Restaura la pila
-*       BRA             OTRO
+BUCLE_ECO:
+        * --- FASE DE LECTURA (SCAN) ---
+        * Apilamos los 3 parámetros de derecha a izquierda: tamaño, descriptor y direccion
+        MOVE.W  #TAMANO, -(A7)  * Apila el tamaño máximo a leer (2 bytes)
+        MOVE.W  #0, -(A7)       * Apila el descriptor: 0 = Línea A (2 bytes)
+        MOVE.L  #DIR_BUF, -(A7) * Apila la dirección de inicio del buffer (4 bytes)
+        BSR     SCAN            * Llama a la subrutina de lectura
+        ADD.L   #8, A7          * Limpiamos la pila (2+2+4 = 8 bytes)
 
-        BREAK
+        * En este punto, D0 contiene el numero real de caracteres leídos
+        * Si no se ha leido nada (D0 = 0) o hubo error, volvemos al inicio
+        CMP.L   #0, D0
+        BLE     BUCLE_ECO       * Si D0 <= 0, repite el bucle
+
+        * --- FASE DE ESCRITURA (PRINT) ---
+        * Reutilizamos el tamaño exacto que devolvió D0 para imprimir solo lo leído
+        MOVE.W  D0, -(A7)       * Apila el tamaño a imprimir (2 bytes, desde D0)
+        MOVE.W  #0, -(A7)       * Apila el descriptor: 0 = Línea A (2 bytes)
+        MOVE.L  #DIR_BUF, -(A7) * Apila la dirección del buffer (4 bytes)
+        BSR     PRINT           * Llama a la subrutina de escritura
+        ADD.L   #8, A7          * Limpiamos la pila (8 bytes)
+
+        BRA     BUCLE_ECO       * Bucle infinito para probar el eco continuamente
+        
+        BREAK                   * Instrucción de parada (nunca se alcanzará por el BRA)
 **************************** FIN PROGRAMA PRINCIPAL ******************************************
 
 	INCLUDE bib_aux.s
