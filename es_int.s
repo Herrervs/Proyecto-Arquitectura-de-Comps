@@ -228,7 +228,7 @@ BUCLE_RTI:
         BTST    #BIT_TXB, D1
         BNE     RUTINA_TXB
 
-        * Si llegamos aquí, hemos atendido todo lo pendiente
+        * Si llegamos aqui, hemos atendido todo lo pendiente
         BRA     FIN_RTI
 
 RUTINA_RXA:
@@ -279,7 +279,7 @@ FIN_RTI:
 **************************** FIN RTI **********************************************
 
 **************************** PROGRAMA PRINCIPAL **********************************************
-TAMANO  EQU     80          * Tamaño del bloque (80 caracteres, cumple la norma < 300)
+TAMANO  EQU     80          * Tamaño del bloque = 80
 DIR_BUF EQU     $5000       * Dirección de memoria libre para el buffer temporal
 
 INICIO: 
@@ -288,11 +288,11 @@ INICIO:
 BUCLE_ECO:
         * --- FASE DE LECTURA (SCAN) ---
         * Apilamos los 3 parámetros de derecha a izquierda: tamaño, descriptor y direccion
-        MOVE.W  #TAMANO, -(A7)  * Apila el tamaño máximo a leer (2 bytes)
-        MOVE.W  #0, -(A7)       * Apila el descriptor: 0 = Línea A (2 bytes)
-        MOVE.L  #DIR_BUF, -(A7) * Apila la dirección de inicio del buffer (4 bytes)
+        MOVE.W  #TAMANO, -(A7)  * Apila el tamaño máximo a leer
+        MOVE.W  #0, -(A7)       * Apila el descriptor: 0 = Línea A
+        MOVE.L  #DIR_BUF, -(A7) * Apila la dirección de inicio del buffer
         BSR     SCAN            * Llama a la subrutina de lectura
-        ADD.L   #8, A7          * Limpiamos la pila (2+2+4 = 8 bytes)
+        ADD.L   #8, A7          * Limpiamos la pila
 
         * En este punto, D0 contiene el numero real de caracteres leídos
         * Si no se ha leido nada (D0 = 0) o hubo error, volvemos al inicio
@@ -302,14 +302,14 @@ BUCLE_ECO:
         * --- FASE DE ESCRITURA (PRINT) ---
         * Reutilizamos el tamaño exacto que devolvió D0 para imprimir solo lo leído
         MOVE.W  D0, -(A7)       * Apila el tamaño a imprimir (2 bytes, desde D0)
-        MOVE.W  #0, -(A7)       * Apila el descriptor: 0 = Línea A (2 bytes)
-        MOVE.L  #DIR_BUF, -(A7) * Apila la dirección del buffer (4 bytes)
+        MOVE.W  #0, -(A7)       * Apila el descriptor: 0 = Línea A
+        MOVE.L  #DIR_BUF, -(A7) * Apila la dirección del buffer
         BSR     PRINT           * Llama a la subrutina de escritura
-        ADD.L   #8, A7          * Limpiamos la pila (8 bytes)
+        ADD.L   #8, A7          * Limpiamos la pila
 
         BRA     BUCLE_ECO       * Bucle infinito para probar el eco continuamente
         
-        BREAK                   * Instrucción de parada (nunca se alcanzará por el BRA)
+        BREAK                   * Instrucción de parada (inalcanzable por BRA)
 **************************** FIN PROGRAMA PRINCIPAL ******************************************
 
 	INCLUDE bib_aux.s
