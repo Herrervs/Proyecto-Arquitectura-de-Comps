@@ -279,11 +279,14 @@ FIN_RTI:
 **************************** FIN RTI **********************************************
 
 **************************** PROGRAMA PRINCIPAL **********************************************
-TAMANO  EQU     80          * Tamaño del bloque = 80
-DIR_BUF EQU     $5000       * Dirección de memoria libre para el buffer temporal
+TAMANO  EQU     80              * Tamaño del bloque = 80
+DIR_BUF EQU     $5000           * Dirección de memoria libre para el buffer temporal
 
 INICIO: 
-        BSR     INIT        * Inicia el controlador DUART y sus interrupciones
+        BSR     INIT            * Inicia el controlador DUART y sus interrupciones
+
+        * Desbloqueo de interrupciones de la CPU
+        MOVE.W  #$2000, SR      * $2000 = %0010 0000 0000 0000 -> Supervisor=1, Máscara=000
 
 BUCLE_ECO:
         * --- FASE DE LECTURA (SCAN) ---
