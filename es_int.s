@@ -93,68 +93,65 @@ INIT:
 PRINT:  
         LINK    A6,#0
         
-        * Extraccion y validacion del Descriptor
-        MOVE.W  12(A6),D2       * D2 = Descriptor (0 para Linea A, 1 para Linea B)
+        * miro que desc es
+        MOVE.W  12(A6),D2       * D2 = desc
         CMP.W   #1,D2
-        BHI     ERROR_PRINT     * Si el descriptor es > 1, es un error
+        BHI     ERR_PRINT       * si es > 1 es error
 
-        * Preparacion de variables
-        MOVE.L  8(A6),A1        * A1 = Direccion del buffer de lectura en memoria
-        MOVE.W  14(A6),D3       * D3 = Tamano de caracteres a escribir
-        CLR.L   D4              * D4 = Contador de caracteres aceptados/escritos
+        * cojo parametros
+        MOVE.L  8(A6),A1        * mem buf
+        MOVE.W  14(A6),D3       * tamano
+        CLR.L   D4              * D4 = escritos
 
-        * Calcular el parametro de buffer para ESCCAR (Descriptor + 2)
-        MOVE.L  D2,D5           * Copiamos el descriptor (0 o 1) a D5
-        ADD.L   #2,D5           * D5 ahora vale 2 (TxA) o 3 (TxB). Lo usaremos en el bucle.
+        * offset para esccar
+        MOVE.L  D2,D5
+        ADD.L   #2,D5           * +2 para los TX
 
 BUCLE_PRINT:
-        * Condicion de salida por tamano
-        CMP.W   #0,D3           * Quedan caracteres por procesar?
-        BEQ     EVALUAR_INTERRUPCION
+        CMP.W   #0,D3           * quedan char?
+        BEQ     COMPROBAR_INT
         
-        * Escritura en el buffer interno
-        MOVE.B  (A1)+,D1        * Extraemos el caracter del buffer de memoria a D1
-        MOVE.L  D5,D0           * Cargamos en D0 el valor del buffer destino (2 o 3)
-        BSR     ESCCAR          * Intentamos escribir en el buffer interno
+        MOVE.B  (A1)+,D1        * saco char
+        MOVE.L  D5,D0           * destino
+        BSR     ESCCAR
         
-        * Condicion de salida por buffer interno lleno
-        CMP.L   #-1,D0          * Devolvio -1 indicando que no cabe?
-        BEQ     EVALUAR_INTERRUPCION
+        CMP.L   #-1,D0          * no cabe mas?
+        BEQ     COMPROBAR_INT
 
         * Actualizacion
         ADD.L   #1,D4           * Incrementamos contador de caracteres guardados
         SUB.W   #1,D3           * Decrementamos caracteres restantes
         BRA     BUCLE_PRINT     * Siguiente caracter
 
-EVALUAR_INTERRUPCION:
-        * Comprobar si realmente escribimos algo para habilitar transmision
+COMPROBAR_INT:
+        * si he escrito algo activo interrupcion
         CMP.L   #0,D4
-        BEQ     EXITO_PRINT     * Si D4 es 0, no hay que activar interrupciones
+        BEQ     FIN_PRINT_OK    * si D4 es 0 paso
 
         * Seccion critica: Proteccion de variables compartidas (IMR)
         MOVE.W  SR,D6           * Guardamos el registro de estado actual en D6
         MOVE.W  #$2700,SR       * Inhibimos las interrupciones temporalmente
 
-        * Decidir que bit del IMR activar segun el descriptor
+        * miro el bit del desc
         CMP.W   #0,D2
         BEQ     HAB_A
 
 HAB_B:
         BSET    #4,COPIAIMR     * Bit 4 = Interrupcion de transmision Linea B
-        BRA     APLICAR_IMR
+        BRA     ACTUALIZAR_IMR
         
 HAB_A:
         BSET    #0,COPIAIMR     * Bit 0 = Interrupcion de transmision Linea A
 
-APLICAR_IMR:
-        MOVE.B  COPIAIMR,DUART_BASE+O_IMR * Volcamos la copia al registro real IMR
-        MOVE.W  D6,SR           * Restauramos el registro de estado (fin de exclusion mutua)
+ACTUALIZAR_IMR:
+        MOVE.B  COPIAIMR,DUART_BASE+O_IMR * actualizo hardware
+        MOVE.W  D6,SR           * vuelvo SR a su sitio
 
-EXITO_PRINT:
-        MOVE.L  D4,D0           * Devolvemos el numero de caracteres procesados en D0
+FIN_PRINT_OK:
+        MOVE.L  D4,D0           * pongo return
         BRA     FIN_PRINT
 
-ERROR_PRINT:
+ERR_PRINT:
         MOVE.L  #$FFFFFFFF,D0   * Error por descriptor invalido
 
 FIN_PRINT:
@@ -166,40 +163,36 @@ FIN_PRINT:
 SCAN:   
         LINK    A6,#0
         
-        * Extraccion y validacion del Descriptor
-        MOVE.W  12(A6),D2       * D2 = Descriptor (0 para linea A, 1 para linea B)
+        * miro que desc es
+        MOVE.W  12(A6),D2       * D2 = desc
         CMP.W   #1,D2
-        BHI     ERROR_SCAN      * Branch if Higher: Si es mayor estricto que 1, es un error
+        BHI     ERR_SCAN        * si es > 1 error
 
-        * Preparacion de parametros para el bucle
-        MOVE.L  8(A6),A1        * A1 = Direccion del buffer de destino en memoria
-        MOVE.W  14(A6),D3       * D3 = Tamano maximo a leer
-        CLR.L   D4              * D4 = Contador de caracteres leidos (inicializado a 0)
+        * cojo params
+        MOVE.L  8(A6),A1        * buf dest
+        MOVE.W  14(A6),D3       * tam. max
+        CLR.L   D4              * leidos a 0
 
 BUCLE_SCAN:
-        * Condicion de salida por tamano
-        CMP.W   #0,D3           * Hemos leido ya el numero maximo de caracteres solicitados?
-        BEQ     EXITO_SCAN      * Si es 0, terminamos
+        CMP.W   #0,D3           * acabe de leer?
+        BEQ     FIN_SCAN_OK
 
-        * Lectura del caracter
-        MOVE.L  D2,D0           * El descriptor (0 o 1) coincide exactamente con el parametro para LEECAR
-        BSR     LEECAR          * Extraemos un caracter del buffer interno correspondiente
+        MOVE.L  D2,D0           * desc
+        BSR     LEECAR          * busco char
 
-        * Condicion de salida por buffer vacio
-        CMP.L   #-1,D0          * Devolvio LEECAR un -1 indicando que el buffer esta vacio?
-        BEQ     EXITO_SCAN      * Si es asi, no hay mas caracteres y salimos del bucle
+        CMP.L   #-1,D0          * vacio?
+        BEQ     FIN_SCAN_OK
 
-        * Almacenamiento y actualizacion
-        MOVE.B  D0,(A1)+        * Guardamos el caracter extraido en el buffer del usuario y avanzamos puntero
-        ADD.L   #1,D4           * Incrementamos el contador de caracteres leidos
-        SUB.W   #1,D3           * Decrementamos los caracteres que nos faltan por leer
-        BRA     BUCLE_SCAN      * Repetimos el ciclo
+        MOVE.B  D0,(A1)+        * guardo en array
+        ADD.L   #1,D4           * leido +1
+        SUB.W   #1,D3           * faltan -1
+        BRA     BUCLE_SCAN
 
-EXITO_SCAN:
-        MOVE.L  D4,D0           * Devolvemos el numero total de caracteres leidos en D0
+FIN_SCAN_OK:
+        MOVE.L  D4,D0           * devuelvo d4
         BRA     FIN_SCAN
 
-ERROR_SCAN:
+ERR_SCAN:
         MOVE.L  #$FFFFFFFF,D0   * Devolvemos el codigo de error por descriptor invalido
 
 FIN_SCAN:
@@ -296,11 +289,7 @@ INICIO:
         * Desbloqueo de interrupciones de la CPU
         MOVE.W  #$2000,SR       * $2000 = %0010 0000 0000 0000 -> Supervisor=1, Mascara=000
 
-* =============================================================================
-* TEST 1: Eco en Linea A (caso original)
-* Lee caracteres de la Linea A y los escribe de vuelta por la Linea A.
-* Valida: SCAN(desc=0), PRINT(desc=0), RTI(RxA,TxA)
-* =============================================================================
+* Prueba 1: Eco en Linea A (caso original)
 BUCLE_ECO_A:
         MOVE.W  #TAMANO,-(A7)   * Tamano maximo a leer
         MOVE.W  #0,-(A7)        * Descriptor: 0 = Linea A
@@ -319,11 +308,7 @@ BUCLE_ECO_A:
 
         BRA     BUCLE_ECO_A
 
-* =============================================================================
-* TEST 2: Eco en Linea B
-* Lee caracteres de la Linea B y los escribe de vuelta por la Linea B.
-* Valida: SCAN(desc=1), PRINT(desc=1), RTI(RxB,TxB)
-* =============================================================================
+* Prueba 2: Eco en Linea B
 *BUCLE_ECO_B:
 *        MOVE.W  #TAMANO,-(A7)   * Tamano maximo a leer
 *        MOVE.W  #1,-(A7)        * Descriptor: 1 = Linea B
@@ -342,10 +327,7 @@ BUCLE_ECO_A:
 *
 *        BRA     BUCLE_ECO_B
 
-* =============================================================================
-* TEST 3: Eco cruzado (Lee de A, escribe por B)
-* Valida: SCAN(desc=0), PRINT(desc=1), RTI(RxA,TxB) simultaneamente
-* =============================================================================
+* Prueba 3: Eco cruzado (Lee de A, escribe por B)
 *BUCLE_ECO_CRUZADO:
 *        MOVE.W  #TAMANO,-(A7)
 *        MOVE.W  #0,-(A7)        * Lee de Linea A
@@ -364,10 +346,7 @@ BUCLE_ECO_A:
 *
 *        BRA     BUCLE_ECO_CRUZADO
 
-* =============================================================================
-* TEST 4: Eco cruzado inverso (Lee de B, escribe por A)
-* Valida: SCAN(desc=1), PRINT(desc=0), RTI(RxB,TxA) simultaneamente
-* =============================================================================
+* Prueba 4: Eco cruzado inverso (Lee de B, escribe por A)
 *BUCLE_ECO_CRUZ_INV:
 *        MOVE.W  #TAMANO,-(A7)
 *        MOVE.W  #1,-(A7)        * Lee de Linea B
@@ -386,89 +365,56 @@ BUCLE_ECO_A:
 *
 *        BRA     BUCLE_ECO_CRUZ_INV
 
-* =============================================================================
-* TEST 5: Descriptor invalido en SCAN (descriptor = 2)
-* Debe devolver D0 = -1 ($FFFFFFFF) como codigo de error.
-* Valida: Gestion de errores de SCAN con descriptor fuera de rango.
-* =============================================================================
+* Prueba 5: Descriptor invalido en SCAN (descriptor = 2)
 *        MOVE.W  #TAMANO,-(A7)
 *        MOVE.W  #2,-(A7)        * Descriptor invalido (solo 0 y 1 son validos)
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     SCAN
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = $FFFFFFFF (-1)
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 6: Descriptor invalido en PRINT (descriptor = 5)
-* Debe devolver D0 = -1 ($FFFFFFFF) como codigo de error.
-* Valida: Gestion de errores de PRINT con descriptor fuera de rango.
-* =============================================================================
+* Prueba 6: Descriptor invalido en PRINT (descriptor = 5)
 *        MOVE.W  #10,-(A7)
 *        MOVE.W  #5,-(A7)        * Descriptor invalido
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = $FFFFFFFF (-1)
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 7: Descriptor invalido en SCAN (descriptor = $FFFF, valor maximo word)
-* Valida: Robustez con valor extremo como descriptor.
-* =============================================================================
+* Prueba 7: Descriptor invalido en SCAN (descriptor = $FFFF, valor maximo word)
 *        MOVE.W  #TAMANO,-(A7)
 *        MOVE.W  #$FFFF,-(A7)    * Descriptor extremo
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     SCAN
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = $FFFFFFFF (-1)
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 8: SCAN con tamano 0
-* No debe leer ningun caracter. D0 debe ser 0.
-* Valida: Caso borde de tamano = 0 en SCAN.
-* =============================================================================
+* Prueba 8: SCAN con tamano 0
 *        MOVE.W  #0,-(A7)        * Tamano 0: no leer nada
 *        MOVE.W  #0,-(A7)        * Descriptor: Linea A
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     SCAN
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 0
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 9: PRINT con tamano 0
-* No debe escribir ningun caracter ni activar interrupciones de TX.
-* Valida: Caso borde de tamano = 0 en PRINT. El IMR no debe cambiar.
-* =============================================================================
+* Prueba 9: PRINT con tamano 0
 *        MOVE.W  #0,-(A7)        * Tamano 0: no escribir nada
 *        MOVE.W  #0,-(A7)        * Descriptor: Linea A
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 0, COPIAIMR sin bit TxA activado
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 10: PRINT con tamano 1 (un solo caracter)
-* Valida: Caso minimo de escritura. Se debe transmitir 1 caracter por Linea A.
-* =============================================================================
+* Prueba 10: PRINT con tamano 1 (un solo caracter)
 *        MOVE.B  #'Z',DIR_BUF    * Coloca un caracter 'Z' en la direccion del buffer
 *        MOVE.W  #1,-(A7)        * Tamano: 1 caracter
 *        MOVE.W  #0,-(A7)        * Descriptor: Linea A
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 1, se transmite 'Z' por Linea A
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 11: Imprimir una cadena predefinida por Linea A
-* Carga un mensaje en memoria y lo envia. Permite verificar la transmision
-* completa de una cadena conocida sin depender de la recepcion.
-* Valida: PRINT con datos conocidos, RTI(TxA).
-* =============================================================================
+* Prueba 11: Imprimir una cadena predefinida por Linea A
 *MSG_T11 DC.B    'Hola Mundo!!'
 *MSG_LEN EQU     12
 *
@@ -477,14 +423,9 @@ BUCLE_ECO_A:
 *        MOVE.L  #MSG_T11,-(A7)  * Direccion del mensaje
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 12, se transmite 'Hola Mundo!!' por Linea A
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 12: Imprimir cadena predefinida por Linea B
-* Igual que TEST 11 pero por la Linea B.
-* Valida: PRINT(desc=1) con datos conocidos, RTI(TxB).
-* =============================================================================
+* Prueba 12: Imprimir cadena predefinida por Linea B
 *MSG_T12 DC.B    'Test LineaB!'
 *MSG_L12 EQU     12
 *
@@ -493,14 +434,9 @@ BUCLE_ECO_A:
 *        MOVE.L  #MSG_T12,-(A7)
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 12, se transmite 'Test LineaB!' por Linea B
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 13: Eco simultaneo en ambas lineas (A y B)
-* Lee de ambas lineas y escribe de vuelta a cada una.
-* Valida: Funcionamiento concurrente de ambos canales y su RTI.
-* =============================================================================
+* Prueba 13: Eco simultaneo en ambas lineas (A y B)
 *BUCLE_DUAL:
 *        * --- Eco Linea A ---
 *        MOVE.W  #TAMANO,-(A7)
@@ -537,12 +473,7 @@ BUCLE_ECO_A:
 *
 *        BRA     BUCLE_DUAL
 
-* =============================================================================
-* TEST 14: Escritura grande (intenta saturar el buffer interno de TX)
-* Envia un bloque de 2000 bytes para provocar que el buffer circular se llene.
-* El valor devuelto en D0 debe ser <= 2000 (los que cupieron).
-* Valida: Comportamiento de PRINT cuando ESCCAR devuelve -1 (buffer lleno).
-* =============================================================================
+* Prueba 14: Escritura grande (intenta saturar el buffer interno de TX)
 *TAM_BIG EQU     2000
 *
 *        * Rellenar el buffer de memoria con el caracter 'A' (preparacion del test)
@@ -557,15 +488,9 @@ BUCLE_ECO_A:
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 2000 (si el buffer esta vacio) o D0 < 2000
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 15: Multiples PRINTs consecutivos (acumulacion en buffer)
-* Envia dos bloques seguidos para verificar que el buffer acumula caracteres
-* correctamente entre llamadas y las interrupciones TX los van vaciando.
-* Valida: Acumulacion en buffer circular, coherencia entre PRINTs.
-* =============================================================================
+* Prueba 15: Multiples PRINTs consecutivos (acumulacion en buffer)
 *MSG_P1  DC.B    'Primero-'
 *MSG_L1  EQU     8
 *MSG_P2  DC.B    'Segundo!'
@@ -584,28 +509,17 @@ BUCLE_ECO_A:
 *        MOVE.L  #MSG_P2,-(A7)
 *        BSR     PRINT
 *        ADD.L   #8,A7
-*        * Resultado esperado: se transmite 'Primero-Segundo!' por Linea A
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 16: SCAN de buffer vacio
-* Llama a SCAN sin que haya habido ninguna recepcion previa. Debe devolver 0.
-* Valida: SCAN con buffer de recepcion vacio (LEECAR devuelve -1 de inmediato).
-* =============================================================================
+* Prueba 16: SCAN de buffer vacio
 *        MOVE.W  #TAMANO,-(A7)
 *        MOVE.W  #0,-(A7)        * Descriptor: Linea A
 *        MOVE.L  #DIR_BUF,-(A7)
 *        BSR     SCAN
 *        ADD.L   #8,A7
-*        * Resultado esperado: D0 = 0 (nada que leer)
-*        BREAK
+*        *        BREAK
 
-* =============================================================================
-* TEST 17: SCAN con tamano 1 (un solo caracter)
-* Lee un unico caracter de la Linea A. Se debe enviar un caracter previamente
-* por el terminal para que haya algo en el buffer de recepcion.
-* Valida: Caso minimo de lectura.
-* =============================================================================
+* Prueba 17: SCAN con tamano 1 (un solo caracter)
 *BUCLE_T17:
 *        MOVE.W  #1,-(A7)        * Tamano: 1 caracter
 *        MOVE.W  #0,-(A7)        * Descriptor: Linea A
@@ -625,12 +539,7 @@ BUCLE_ECO_A:
 *
 *        BRA     BUCLE_T17
 
-* =============================================================================
-* TEST 18: Eco bidireccional cruzado (A->B y B->A simultaneamente)
-* Lee de cada linea y la envia por la contraria. Maximiza la concurrencia
-* del controlador de interrupciones con las 4 fuentes activas.
-* Valida: RTI con RxA+TxB y RxB+TxA simultaneos, coherencia del COPIAIMR.
-* =============================================================================
+* Prueba 18: Eco bidireccional cruzado (A->B y B->A simultaneamente)
 *BUCLE_BIDIR:
 *        * Lee de A, escribe por B
 *        MOVE.W  #TAMANO,-(A7)
